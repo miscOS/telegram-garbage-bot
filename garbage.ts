@@ -1,14 +1,17 @@
+import { CronJob } from "cron";
+import { DateTime } from "luxon";
 import { Context, Telegraf } from "telegraf";
 import { message } from 'telegraf/filters';
 import { UserManager, User } from "./users";
 import { RegioITApi, Event } from "./api";
 import AppError from "./errors";
 
-
 export default class GarbageBot {
 
+    private cronJob: CronJob;
+    private cronStep: number;
+
     constructor(
-        private TZ: string,
         private chat: Telegraf,
         private users: UserManager = new UserManager,
         private api: RegioITApi = new RegioITApi(),
@@ -33,10 +36,25 @@ export default class GarbageBot {
                 this.errorResponse(ctx, error);
             }
         });
-        // Cron
-        this.chat.command('cron', async (ctx) => {
+        // Reminder
+        this.chat.command('reminder', async (ctx) => {
             try {
-                ctx.reply('Not Yet implemented.');
+                const user = this.users.getUser(ctx.message.chat.id);
+
+                if (!this.cronJob) {
+                    ctx.reply('Mein automatischer Reminder ist nicht aktiv.');
+                } else {
+                    if (ctx.payload) {
+                        let [hour, minute] = this.parseCronTime(ctx.payload);
+                        user.cronTime = DateTime.utc().setZone(user.timezone).set({ hour, minute, second: 0, millisecond: 0 });
+                        user.events.changed();
+                        ctx.reply(`Es wird nun jeden Tag um ${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')} Uhr geprüft, ob am nächsten Tag eine Abholung stattfindet.`);
+                    } else {
+                        user.cronTime = undefined;
+                        user.events.changed();
+                        ctx.reply(`Die automatische Erinnerung wurde gelöscht.`);
+                    }
+                }
             } catch (error) {
                 this.errorResponse(ctx, error);
             }
@@ -53,7 +71,7 @@ export default class GarbageBot {
         });
         // Paper
         this.chat.command('paper', async (ctx) => {
-            try {      
+            try {
                 let user = this.users.getUser(ctx.message.chat.id);
                 const events = await this.getEvents(user, { wasteTypes: [4] });
                 ctx.reply(`${events.garbage[0]} wird am ${events.date.toLocaleDateString('de-DE', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })} abgeholt.`);
@@ -63,7 +81,7 @@ export default class GarbageBot {
         });
         // Plastic
         this.chat.command('plastic', async (ctx) => {
-            try {      
+            try {
                 let user = this.users.getUser(ctx.message.chat.id);
                 const events = await this.getEvents(user, { wasteTypes: [1] });
                 ctx.reply(`${events.garbage[0]} wird am ${events.date.toLocaleDateString('de-DE', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })} abgeholt.`);
@@ -86,7 +104,7 @@ export default class GarbageBot {
                     } else if (!user.streetNumber) {
                         ctx.reply(`Wie lautet deine Hausnummer?`);
                     } else {
-                        ctx.reply(`Einrichtung abgeschlossen. Mit /cron hh:mm kannst du die automatische Erinnerung einstellen.`);
+                        ctx.reply(`Einrichtung abgeschlossen. Mit /reminder hh:mm kannst du die automatische Erinnerung einstellen.`);
                     }
                 }
             } catch (error) {
@@ -98,17 +116,17 @@ export default class GarbageBot {
         });
     }
 
-    private async getEvents(user: User, filter: { wasteTypes: number[], date?: string }, retry: boolean = true): Promise<{ date: Date, garbage: string[] }> {
+    private async getEvents(user: User, filter: { wasteTypes: number[], date?: Date }, retry: boolean = true): Promise<{ date: Date, garbage: string[] }> {
         try {
-            return this.api.getEvents(user.location, filter).then((events: Event[]) => {
+            return this.api.getEvents(user.location, filter.wasteTypes).then((events: Event[]) => {
 
                 const today: Date = new Date();
                 let nextEvent: Date = new Date();
 
                 if (filter.date) {
-                    nextEvent = new Date(filter.date);
+                    nextEvent = filter.date;
                 } else {
-                    events = events.filter( event => new Date(event.datum) >= today);
+                    events = events.filter(event => new Date(event.datum) >= today);
                     nextEvent = new Date(events[0].datum);
                     events.forEach(event => {
                         const eventDate: Date = new Date(event.datum);
@@ -168,6 +186,58 @@ export default class GarbageBot {
         }
     }
 
+    private parseCronTime(payload: string): [number, number] {
+        let [hour, minute] = payload.split(':').map(Number);
+
+        if (hour < 0 || hour > 24 || minute < 0 || minute > 59) {
+            throw new AppError('InvalidChronArgumentExcpetion', 'hour needs to be an integer between 0 and 24, minute needs to be an integer between 0 and 59.');
+        }
+
+        // Limit CronTime to CronSteps
+        if (minute % this.cronStep > Math.floor(this.cronStep / 2)) {
+            minute += this.cronStep - minute % this.cronStep;
+        } else {
+            minute -= minute % this.cronStep;
+        }
+
+        // Respect Minute Limit
+        if (minute >= 60) {
+            minute -= 60;
+            hour += 1;
+        }
+
+        return [hour, minute];
+    }
+
+    private runCron() {
+        this.users.getAllUsers().forEach(async user => {
+            if(!user.cronTime) return;
+
+            const utcDateTime = DateTime.utc();
+            const cronDateTime = user.cronTime.toUTC();
+
+            const utcMinutes = utcDateTime.hour * 60 + utcDateTime.minute;
+            const cronMinutes = cronDateTime.hour *60 + cronDateTime.minute;
+
+            if(Math.abs(utcMinutes - cronMinutes) < this.cronStep) {
+                const date = new Date();
+                date.setDate(date.getDate() + 1);
+
+                const events = await this.getEvents(user, { wasteTypes: [1, 4, 7], date })
+                if( events.garbage.length > 0)
+                    this.chat.telegram.sendMessage(user.id, `Morgen wird folgendes mitgenommen:\n \u22C5 ${events.garbage.join('\n \u22C5 ')}`);
+            }
+        })
+    }
+
+    public setCronJob(minuteStep: number) {
+        if (this.cronJob) this.cronJob.stop();
+        // Limit Cronstep between 1 and 30 minutes
+        this.cronStep = Math.max(1, Math.min(30, minuteStep));
+        this.cronJob = new CronJob(`*/${this.cronStep} * * * *`, this.runCron.bind(this));
+        this.cronJob.start();
+    }
+
     private errorResponse(ctx: Context, error: AppError) {
         if (error instanceof AppError) {
             switch (error.code) {
@@ -182,6 +252,9 @@ export default class GarbageBot {
                     break;
                 case 'StreetNumberNotFoundExcpetion':
                     ctx.reply(`Die Hausnummer "${ctx.text}" konnte ich nicht finden. Bitte nenne mir erneut die Hausnummer in der du wohnst.`);
+                    break;
+                case 'InvalidChronArgumentExcpetion':
+                    ctx.reply(`Ich konnte den Chronjob nicht erstellen. Bitte nutze das korrekte Format.\nBeispiel: "/reminder 20:15" für eine Erinnerung am Vortag um 20:15 Uhr.`);
                     break;
                 default:
                     ctx.reply(`Unbekannter API Fehler.`);

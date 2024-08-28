@@ -16,9 +16,9 @@ export class RegioITApi {
         return this.garbageTypes[id];
     }
 
-    async getEvents(locationId: number, filter?: {wasteTypes: number[], date?: string}): Promise<Event[]> {
+    async getEvents(locationId: number, filter?: number[]): Promise<Event[]> {
 
-        const filterString: string = (filter) ? filter.wasteTypes.map(nr => `fraktion=${nr}`).join('&') : '';
+        const filterString: string = (filter) ? filter.map(nr => `fraktion=${nr}`).join('&') : '';
 
         return fetch(new URL(`hausnummern/${locationId}/termine?${filterString}`, this.baseUrl))
             .then(response => {

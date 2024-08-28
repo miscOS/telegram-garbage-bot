@@ -1,14 +1,16 @@
 import AppError from "./errors";
 
 import fs from 'fs';
+import { DateTime } from "luxon";
 import path from 'path';
 
 export class UserManager {
 
+    private users: User[] = [];
+
     constructor(
-        private TZ: string = 'Europe/Berlin',
-        private users: User[] = [],
-        private userfile: string = path.join(__dirname, '..', 'data', 'garbage.users.json'),
+        private TZ: string = 'Europe/Berlin',    
+        private userfile: string = path.join(__dirname, '..', 'data', 'users.json'),
     ) {
         this.load();
     }
@@ -19,7 +21,7 @@ export class UserManager {
             const jsonData = JSON.parse(jsonContent);
 
             this.users = jsonData.map( (userData: User) => {
-                const user = new User(userData.id, userData.city, userData.street, userData.streetNumber, userData.location, userData.cronTime);
+                const user = new User(userData.id, userData.city, userData.street, userData.streetNumber, userData.location, userData.cronTime, userData.timezone);
                 user.events.onChange(this.save.bind(this));
                 return user;
             });
@@ -49,6 +51,7 @@ export class UserManager {
         }
 
         const user: User = new User(id);
+        user.timezone = this.TZ;
         user.events.onChange(this.save.bind(this));
         this.users.push(user);
         this.save();
@@ -63,6 +66,10 @@ export class UserManager {
         this.save();
     }
 
+    getAllUsers(): User[] {
+        return this.users;
+    }
+
     getUser(id: number): User {
         const user: User = this.users.find(user => user.id === id);
 
@@ -75,16 +82,26 @@ export class UserManager {
 
 
 export class User {
-
+  
     constructor(
         public id: number,
         public city?: string,
         public street?: string,
         public streetNumber?: string,
         public location?: number,
-        public cronTime?: string,
+        public cronTime?: DateTime,
+        public timezone: string = 'Europe/Berlin',
         public events: UserEvents = new UserEvents
     ) {}
+
+    setCron(hour: number, minute: number) {
+        if (hour < 0 || hour > 24 || minute < 0 || minute > 59){
+            throw new AppError('InvalidChronArgumentExcpetion', 'hour needs to be an integer between 0 and 24, minute needs to be an integer between 0 and 59.');
+        }
+        
+        this.cronTime = DateTime.utc().setZone(this.timezone).set({ hour, minute, second: 0, millisecond: 0});
+        this.events.changed();
+    }
 }
 
 
