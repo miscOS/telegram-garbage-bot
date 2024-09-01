@@ -1,0 +1,20 @@
+name: garbage
+
+services:
+  
+  DiscordWebCrawler:
+    image: miscos/telegram-garbage-bot:1.0.0
+    build:
+      context: ./
+      dockerfile: Dockerfile
+      network: host
+      tags:
+        - miscos/telegram-garbage-bot:1.0.0
+    container_name: GarbageBot
+    network_mode: bridge
+    volumes:
+      - ./data:/usr/src/app/data
+    environment:
+      TZ: Europe/Berlin
+      BOT_TOKEN: INSERT_YOUR_BOT_TOKEN
+    restart: unless-stopped

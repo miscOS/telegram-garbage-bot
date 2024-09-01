@@ -2,10 +2,10 @@
   "name": "@miscos/telegram-garbage-bot",
   "version": "1.0.0",
   "description": "This waste collection date bot is designed to run in Docker",
-  "main": "dist/main.js",
+  "main": "out/main.js",
   "scripts": {
     "build": "tsc",
-    "start": "node dist/main.js",
+    "start": "node out/main.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "miscOS",
