@@ -118,7 +118,10 @@ export default class GarbageBot {
 
     private async getEvents(user: User, filter: { wasteTypes: number[], date?: Date }, retry: boolean = true): Promise<{ date: Date, garbage: string[] }> {
         try {
-            return this.api.getEvents(user.location, filter.wasteTypes).then((events: Event[]) => {
+            return await this.api.getEvents(user.location, filter.wasteTypes).then((events: Event[]) => {
+                if (events.length == 0) {
+                    throw new AppError('InvalidResponseExcpetion', 'api did not return any events.');
+                }
 
                 const today: Date = new Date();
                 let nextEvent: Date = new Date();
@@ -176,7 +179,7 @@ export default class GarbageBot {
                 user.location = streetNumber.id;
                 user.events.changed();
             });
-        } else if (!location) {
+        } else {
             const city = await this.api.getCity(user.city);
             const street = await this.api.getStreet(city, user.street);
             await this.api.getStreetNumber(street, user.streetNumber).then(streetNumber => {
