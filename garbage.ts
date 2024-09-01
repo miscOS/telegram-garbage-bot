@@ -45,13 +45,10 @@ export default class GarbageBot {
                     ctx.reply('Mein automatischer Reminder ist nicht aktiv.');
                 } else {
                     if (ctx.payload) {
-                        let [hour, minute] = this.parseCronTime(ctx.payload);
-                        user.cronTime = DateTime.utc().setZone(user.timezone).set({ hour, minute, second: 0, millisecond: 0 });
-                        user.events.changed();
+                        const [hour, minute] = user.setCron(ctx.payload, this.cronStep);
                         ctx.reply(`Es wird nun jeden Tag um ${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')} Uhr geprüft, ob am nächsten Tag eine Abholung stattfindet.`);
                     } else {
-                        user.cronTime = undefined;
-                        user.events.changed();
+                        user.removeCron();
                         ctx.reply(`Die automatische Erinnerung wurde gelöscht.`);
                     }
                 }
@@ -189,35 +186,12 @@ export default class GarbageBot {
         }
     }
 
-    private parseCronTime(payload: string): [number, number] {
-        let [hour, minute] = payload.split(':').map(Number);
-
-        if (hour < 0 || hour > 24 || minute < 0 || minute > 59) {
-            throw new AppError('InvalidChronArgumentExcpetion', 'hour needs to be an integer between 0 and 24, minute needs to be an integer between 0 and 59.');
-        }
-
-        // Limit CronTime to CronSteps
-        if (minute % this.cronStep > Math.floor(this.cronStep / 2)) {
-            minute += this.cronStep - minute % this.cronStep;
-        } else {
-            minute -= minute % this.cronStep;
-        }
-
-        // Respect Minute Limit
-        if (minute >= 60) {
-            minute -= 60;
-            hour += 1;
-        }
-
-        return [hour, minute];
-    }
-
     private runCron() {
         this.users.getAllUsers().forEach(async user => {
             if(!user.cronTime) return;
 
             const utcDateTime = DateTime.utc();
-            const cronDateTime = user.cronTime.toUTC();
+            const cronDateTime = DateTime.fromISO(user.cronTime).toUTC();
 
             const utcMinutes = utcDateTime.hour * 60 + utcDateTime.minute;
             const cronMinutes = cronDateTime.hour *60 + cronDateTime.minute;

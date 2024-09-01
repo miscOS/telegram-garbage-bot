@@ -89,18 +89,49 @@ export class User {
         public street?: string,
         public streetNumber?: string,
         public location?: number,
-        public cronTime?: DateTime,
+        public cronTime?: string,
         public timezone: string = 'Europe/Berlin',
         public events: UserEvents = new UserEvents
     ) {}
 
-    setCron(hour: number, minute: number) {
+    removeCron() {
+        this.cronTime = undefined;
+        this.events.changed();
+    }
+
+    setCron(payload: string, cronStep: number): [number, number] {
+        let [hour, minute] = this.parseCronTime(payload, cronStep);
         if (hour < 0 || hour > 24 || minute < 0 || minute > 59){
             throw new AppError('InvalidChronArgumentExcpetion', 'hour needs to be an integer between 0 and 24, minute needs to be an integer between 0 and 59.');
         }
         
-        this.cronTime = DateTime.utc().setZone(this.timezone).set({ hour, minute, second: 0, millisecond: 0});
+        this.cronTime = DateTime.utc().setZone(this.timezone).set({ hour, minute, second: 0, millisecond: 0 }).toISO();
         this.events.changed();
+
+        return [hour, minute];
+    }
+
+    private parseCronTime(payload: string, cronStep: number): [number, number] {
+        let [hour, minute] = payload.split(':').map(Number);
+
+        if (!Number.isInteger(hour) || !Number.isInteger(minute) ||hour < 0 || hour > 24 || minute < 0 || minute > 59) {
+            throw new AppError('InvalidChronArgumentExcpetion', 'hour needs to be an integer between 0 and 24, minute needs to be an integer between 0 and 59.');
+        }
+
+        // Limit CronTime to CronSteps
+        if (minute % cronStep > Math.floor(cronStep / 2)) {
+            minute += cronStep - minute % cronStep;
+        } else {
+            minute -= minute % cronStep;
+        }
+
+        // Respect Minute Limit
+        if (minute >= 60) {
+            minute -= 60;
+            hour += 1;
+        }
+
+        return [hour, minute];
     }
 }
 
